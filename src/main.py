@@ -1,16 +1,17 @@
-import firebase_admin
-from firebase_admin import credentials, firestore
-# Povezujemo Firebase 
-cred = credentials.Certificate("../data/serviceAccountKey.json")
-firebase_admin.initialize_app(cred)
 import os
 from dotenv import load_dotenv
 import logic
 import ai_engine
 import db_manager
-import time
-# Učitavamo .env
+from supabase import create_client, Client
+
+# Učitavamo .env    
 load_dotenv()
+
+url: str = os.getenv("SUPABASE_URL")
+key: str = os.getenv("SUPABASE_KEY")
+supabase: Client = create_client(url, key)
+
 #definisemo centrove grada
 city_centers = {
     "belgrade": (44.7866, 20.4489),
@@ -20,37 +21,26 @@ city_centers = {
 
 
 
-
-
-#povezivanje sa bazom
-db = firestore.client(database_id="ai-studio-a689d4b3-aea7-455a-bd08-676f8a2e1c48")
-
-print("--- USPEŠNO POVEZANO SA MLEKOPUT BAZOM ---")
-
-# 0 Uzimamo orders za ovaj dan
-orders_ref = db.collection("orders")
-orders= orders_ref.where("status", "==", "pending").stream()
-ordered_orders = logic.filtriraj_narudzbine(orders)
-
-        
-
-# 1.1 Uzimamo farmere iz baze
-farmers_ref = db.collection("sellers")
-farmers =  farmers_ref.stream()
-ordered_farmers = logic.filtriraj_farmere(farmers)
-
-# Pristupanje podacima
-print(f"Danas u Beogradu imamo {len(ordered_orders['belgrade'])} narudžbina.")
-
-
-
-print ("\n --- AI ANALIZA PROFITA PO FARMAMA ---")
-    # Ovde pozivamo Gemini za rutu
-
-routes = logic.posalji_rutu(city_centers, ordered_orders, ordered_farmers)
-for city in city_centers:
-    db_manager.sacuvaj_rutu_u_bazu(city, routes[city])
-    logic.azuriraj_stanje_mleka_u_bazi(routes[city])
-
-
-
+def main():
+    #Uzimamo samo narudzbine koje su pending
+    orders_res = supabase.table("orders").select("*").eq("status", "pending").execute()
+    
+    #Uzimamo sve aktivne farme
+    farmers_res = supabase.table("sellers").select("*").eq("is_active",True).execute()
+    
+    ordered_orders = logic.filtriraj_narudzbine(orders_res.data)
+    ordered_farmers = logic.filtriraj_farmere(farmers_res.data)
+    
+    print(f"Danas u Beogradu imamo {len(ordered_orders['belgrade'])} narudzbine.")
+    print("\n --AI ANALIZA I GENERISANJE RUTA--")
+    
+    routes= logic.posalji_rutu(city_centers, ordered_orders, ordered_farmers)
+    
+    for city in city_centers:
+        if routes.get(city):
+            db_manager.sacuvaj_rutu_u_bazu(city, routes[city])
+            
+            logic.azuriraj_stanje_mleka_u_bazi(routes[city])
+            
+if __name__ == "__main__":
+    main()

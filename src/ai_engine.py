@@ -74,7 +74,8 @@ def generisi_rutu(base_city, farmers, buyers, attempt=0):
     - Minimum profit: 1500 RSD per route.
     
     TASK:
-    Generate the most profitable route starting and ending at BASE, while looking to pickup milk from different farmers (our purpouse is to help every farmer sell their milk), deliver to ALL buyers if capacity allows. Calculate total profit: (sales revenue - purchase cost - fuel cost). If profit < 1500, mark as 'low'.
+    Generate the most profitable route starting and ending at BASE,
+    Pickup milk from different farmers (our purpouse is to help every farmer sell their milk in), deliver to ALL buyers if capacity allows. Calculate total profit: (sales revenue - purchase cost - fuel cost). If profit < 1500, mark as 'low'.
     
     RETURN ANSWER ONLY AS JSON:
     {{
@@ -83,7 +84,7 @@ def generisi_rutu(base_city, farmers, buyers, attempt=0):
             {{"name": "Buyer B", "id": "buyer_doc_id", "type": "buyer", "liters": 80}},
             ...
         ], // List of locations (farmer names or buyer names)
-        "actions": ["pickup 100L from Farmer A", "deliver 80L to Buyer B", ...],  // Step-by-step actions
+        "actions": ["pickup 100L from Farmer A", "deliver 80L to Buyer B", ...],  // Step-by-step actions Starting and end point are Base of driver and taket that in consideration when making a route
         "profitability": "high/medium/low",  // Based on profit
         "total_profit": 2500  // Calculated number
     }}

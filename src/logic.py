@@ -1,16 +1,23 @@
-from geopy.distance import geodesic
+from geopy.distance import geodesic, great_circle
 from datetime import datetime
-today = datetime.now().date()
-from geopy.distance import great_circle
+from supabase import create_client, Client
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
 import ai_engine
-import firebase_admin
-from firebase_admin import credentials, firestore
-db = firestore.client(database_id="ai-studio-a689d4b3-aea7-455a-bd08-676f8a2e1c48")
-#definisemo centrove grada 
+
+# ---baza---
+url: str = os.getenv("SUPABASE_URL")
+key: str = os.getenv("SUPABASE_KEY") # service_role ključ
+supabase: Client = create_client(url, key)
+
+# ---konstante--- 
+today = datetime.now().date()
 belgrade = (44.7866, 20.4489)
 nis = (43.3209, 21.8954)
 novi_sad = (45.2396, 19.8227)
-radius = 92
+RADIUS = 92
 MIN_PROFIT=1500
 NABAVNA_CENA=80
 PDV=0.1
@@ -18,112 +25,90 @@ GORIVO=35
 PRODAJNA_CENA=180
 
 def filtriraj_narudzbine(orders):
-    buyers_belgrade = []
-    buyers_nis = []
-    buyers_novi_sad = []
+    filtrirano = {"belgrade": [], "nis": [], "novi_sad": []}
 
-    for doc in orders:
-        orders_data=doc.to_dict()
-        orders_data["order_id"]=doc.id
-        order_timestamp = orders_data.get("date_of_order")
-        address_of_buyer = orders_data.get("address_of_buyer")
+    for data in orders:
+        
+        order_timestamp = data.get("date_of_order")
+        address = data.get("address_of_buyer") #Ocekuje se [lat,lng]
+        
         if order_timestamp:
             # Ako je u bazi Timestamp, on već ima metodu .date()
             # Ako je slučajno string, moraćemo prvo da ga konvertujemo (vidi ispod)
             try:
-                order_date = order_timestamp.date()
-            except AttributeError:
-                # U slucaju da je ipak ostao string u nekom dokumentu
-                #prilagodi format "March 28, 2003"
-                order_date =  datetime.strptime(order_timestamp.split(" at")[0], "%B %d, %Y").date()
+                order_date = datetime.fromisoformat(order_timestamp.replace('Z', '+00:00')).date()
+            except:
+                order_date = today #Fallback za testiranje
             if order_date == today:
-                if is_within_radius(*address_of_buyer, *belgrade,92):
-                    buyers_belgrade.append(orders_data) 
-                elif is_within_radius(*address_of_buyer, *nis,92):
-                    buyers_nis.append(orders_data)
-                elif is_within_radius(*address_of_buyer, *novi_sad,92):
-                    buyers_novi_sad.append(orders_data)      
-    
-    return {
-        "belgrade":buyers_belgrade,
-        "nis": buyers_nis,
-        "novi_sad": buyers_novi_sad
-        
-    }
+                if is_within_radius(*address, *belgrade, RADIUS):
+                    filtrirano["belgrade"].append(data) 
+                elif is_within_radius(*address, *nis, RADIUS):
+                    filtrirano["nis"].append(data)
+                elif is_within_radius(*address, *novi_sad, RADIUS):
+                    filtrirano["novi_sad"].append(data)      
+    return filtrirano
 
 def filtriraj_farmere(farmers):
-    farmers_belgrade = []
-    farmers_nis = []
-    farmers_novi_sad = []
+    filtrirano = {"belgrade": [],"nis": [],"novi_sad": []}
     
-    for doc in farmers:
-        farmers_data = doc.to_dict()
-        farmers_data["id"] = doc.id  # Dodaj ID dokumenta
-        address_of_farm = farmers_data.get("location")
-        if is_within_radius(*address_of_farm, *belgrade,92):
-            farmers_belgrade.append(farmers_data) 
-        elif is_within_radius(*address_of_farm, *nis,92):
-            farmers_nis.append(farmers_data)
-        elif is_within_radius(*address_of_farm, *novi_sad,92):
-            farmers_novi_sad.append(farmers_data)
-    return {
-        "belgrade":farmers_belgrade,
-        "nis": farmers_nis,
-        "novi_sad": farmers_novi_sad
-    }
-        
+    for data in farmers:
+        address = data.get("location")
+        if is_within_radius(*address, *belgrade, RADIUS):
+            filtrirano["belgrade"].append(data) 
+        elif is_within_radius(*address, *nis,RADIUS):
+            filtrirano["nis"].append(data)
+        elif is_within_radius(*address, *novi_sad,RADIUS):
+            filtrirano["novi_sad"].append(data)
+    return filtrirano
 
 # Proveravamo kome gradu pripada porudzbina
 def is_within_radius(lat, lon, center_lat, center_lon, radius_km):
-    center = (center_lat, center_lon)
-    target = (lat, lon)
-    # great_circle calculates the distance over a spherical earth
-    distance = great_circle(center, target).km
-    
-    return distance <= radius_km
+    return great_circle((center_lat, center_lon),(lat,lon)).km <= radius_km
 
-def izracunaj_udaljenost(tacka_a, tacka_b):
-    """_summary_
-        vraca udaljenosti 
-    Args:
-        tacka_a (_type_): latitude
-        tacka_b (_type_): longitude
-    """
-    return geodesic(tacka_a, tacka_b).km
+# def izracunaj_udaljenost(tacka_a, tacka_b):
+#     """_summary_
+#         vraca udaljenosti 
+#     Args:
+#         tacka_a (_type_): latitude
+#         tacka_b (_type_): longitude
+#     """
+#     return geodesic(tacka_a, tacka_b).km
 
 def proveri_isplativost(litri,km):
     """Da li nam se isplati da palimo kamion"""
     zarada_po_litru=PRODAJNA_CENA*(1-PDV)-NABAVNA_CENA
-    trosak_po_km=GORIVO
-    
-    ukupna_zarada= litri*zarada_po_litru
-    ukupni_trosak= km*trosak_po_km
-    
     # Ako je zarada veca od troska vracamo True
-    return (ukupna_zarada - ukupni_trosak)>MIN_PROFIT
+    return (litri* zarada_po_litru - km*GORIVO)>MIN_PROFIT
     
 def posalji_rutu(city_centers,ordered_orders,ordered_farmers):
-    routes = {}
+    
+    routes={}
     for city, coordinates in city_centers.items():
-        buyers = ordered_orders[city]
-        farmers = ordered_farmers[city]
-
+        buyers = ordered_orders.get(city, [])
+        farmers = ordered_farmers.get(city, [])
+        
         if buyers and farmers:
-            print(f"\n Generišem rutu za {city.upper()}...")
+            print(f"\n Generišem rutu za {city.upper()} preko AI engine-a...")
 
-            # Pozivamo AI engine za taj specifičan grad
-            route = ai_engine.generisi_rutu(coordinates, farmers, buyers)
+            # Pozivamo AI engine
+            route = ai_engine.generisi_rutu(coordinates,farmers,buyers)
+            
             for buyer in buyers:
                 try:
-                    db.collection("orders").document(buyer['order_id']).update({"status": "assigned"})
+                    order_id = buyer.get('order.id') or buyer.get('id')
+                    supabase.table("orders") \
+                        .update({"status": "assigned"}) \
+                        .eq("id", order_id)\
+                        .execute()
                 except Exception as e:
-                    print(f"Greška pri update-u order-a {buyer['order_id']}: {e}")
-            print(f" Ruta za {city.upper()} spremna!")
-            routes[city] = route
+                    print(f"❌ Greška pri update-u narudžbine {order_id}: {e}")
+            print(f"Ruta za {city.upper()} je spremna i narudzbine su rezervisane!")
+            routes[city]=route
         else:
-            print(f"\n Za {city.upper()} danas nema dovoljno podataka")
+            print(f"Za {city.upper()} danas nema dovoljno podataka (kupaca ili farmera).")
             routes[city]=None
-    return routes
+    return routes;
+
     
 def azuriraj_stanje_mleka_u_bazi(route_data):
     """
@@ -145,17 +130,15 @@ def azuriraj_stanje_mleka_u_bazi(route_data):
         try:
             if stop_type == 'farmer':
                 # Oduzimamo od dostupnog mleka (Increment sa minusom)
-                print(f"🚜 Farmer {stop['name']}: Oduzimam {liters}L")
-                db.collection("sellers").document(doc_id).update({
-                    "total_stock": firestore.Increment(-liters)
-                })
-            
+                res = supabase.table("sellers").select("total_stock").eq("id", doc_id).single().execute()
+                novo_stanje = res.data["total_stock"]-liters
+                supabase.table("sellers").update({"total_stock": novo_stanje}).eq("id", doc_id).execute()
+                print(f"Farmer {stop['name']}: Novo stanje {novo_stanje}L")
             elif stop_type == 'buyer':
-                # Opciono: Možeš i kupcima da smanjiš potražnju ili promeniš status
-                print(f"🚛 Kupac {stop['name']}: Isporučeno {liters}L")
-                db.collection("orders").document(doc_id).update({
+                supabase.table("orders").update({
                     "status": "completed",
                     "delivered_liters": liters
-                })
+                }).eq("id",doc_id).execute()
+                print(f"Kupac {stop['name']}: Isporuceno")
         except Exception as e:
             print(f"❌ Greška pri ažuriranju dokumenta {doc_id}: {e}")

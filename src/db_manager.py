@@ -1,23 +1,38 @@
-import firebase_admin
-from firebase_admin import credentials, firestore
+import os
+from supabase import create_client, Client
+from dotenv import load_dotenv
 
-db = firestore.client(database_id="ai-studio-a689d4b3-aea7-455a-bd08-676f8a2e1c48")
+load_dotenv()
+
+#koristimo Service_key koji cuvamo u .env
+url: str = os.getenv("SUPABASE_URL")
+key: str = os.getenv("SUPABASE_KEY")
+supabase: Client = create_client(url,key)
+
 
 def sacuvaj_rutu_u_bazu(city, route_data):
     if not route_data:
-        return
-    
+        return None
     try:
-        #dodajemo meta podatke (Vreme i grad)
-        route_data["city"] = city
-        route_data["timestamp"] = firestore.SERVER_TIMESTAMP
-        route_data["status"] = "active"
+        # Pripremamo podatke za SQL tabelu 'routes'
+        # Supabase ce generisati default stvari koje ne ubacimo u tabelu
+        insert_data = {
+            "city": city.lower(),
+            "actions": route_data.get("actions"), #JSONB kolona
+            "delivery_order": route_data.get("deliver_order"),
+            "status": "active"
+        }
+        #SupaBase insert
+        response =  supabase.table("routes").insert(insert_data).execute()
         
-        # Upisujemo  u novu kolekciju routes
-        new_route_ref = db.collection("routes").add(route_data)
-        print(f"Ruta za {city.upper()} uspesno sacuvana u Firebase! ID:, {new_route_ref[1].id if isinstance(new_route_ref, tuple) else new_route_ref.id}")
-        
-        return new_route_ref[1].id if isinstance(new_route_ref, tuple) else new_route_ref.id
+        #provera da li je upis uspeo
+        if response.data:
+            new_route_id = response.data[0]['id']
+            print(f"Ruta za {city.upper()} je uspesno sacuvana u SupaBase! ID: {new_route_id}")
+            return new_route_id
+        else:
+            print(f"Problem pri snimanju rute za {city.upper()}.")
+            return None
     except Exception as e:
         print(f"Greška pri snimanju rute za {city.upper()}: {e}")
         return None
